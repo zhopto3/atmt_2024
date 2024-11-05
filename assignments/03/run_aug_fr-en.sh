@@ -12,21 +12,21 @@ base=$pwd/../..
 cd $base
 echo "changed dir into $base"
 
-# mkdir -p assignments/03/aug_fr-en
+mkdir -p assignments/03/aug_fr-en
 
-# #train translator 
-# python train.py \
-#     --data data/en-fr/prepared_augmented_fr-en \
-#     --source-lang fr \
-#     --target-lang en \
-#     --save-dir assignments/03/aug_fr-en/checkpoints
+#train translator 
+python train.py \
+    --data data/en-fr/prepared_augmented_fr-en \
+    --source-lang fr \
+    --target-lang en \
+    --save-dir assignments/03/aug_fr-en/checkpoints
 
-# # #Run inference on the test set
-# python translate.py \
-#     --data data/en-fr/prepared_augmented_fr-en \
-#     --dicts data/en-fr/prepared_augmented_fr-en \
-#     --checkpoint-path assignments/03/aug_fr-en/checkpoints/checkpoint_last.pt \
-#     --output assignments/03/aug_fr-en/aug_fr-en_translations.txt
+# #Run inference on the test set
+python translate.py \
+    --data data/en-fr/prepared_augmented_fr-en \
+    --dicts data/en-fr/prepared_augmented_fr-en \
+    --checkpoint-path assignments/03/aug_fr-en/checkpoints/checkpoint_last.pt \
+    --output assignments/03/aug_fr-en/aug_fr-en_translations.txt
 
 #Run post processing
 bash assignments/03/postprocess_bpe300.sh \
