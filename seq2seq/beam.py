@@ -6,11 +6,12 @@ from queue import PriorityQueue
 
 class BeamSearch(object):
     """ Defines a beam search object for a single input sentence. """
-    def __init__(self, beam_size, max_len, pad):
+    def __init__(self, beam_size, max_len, pad, stop: str = "default"):
 
         self.beam_size = beam_size
         self.max_len = max_len
         self.pad = pad
+        self.stop = stop
 
         self.nodes = PriorityQueue() # beams to be expanded
         self.final = PriorityQueue() # beams that ended in EOS
@@ -53,21 +54,62 @@ class BeamSearch(object):
         node = (node[0], node[2])
 
         return node
-
-    def prune(self):
-        """ Removes all nodes but the beam_size best ones (lowest neg log prob) """
-        nodes = PriorityQueue()
+    
+    def _default_prune(self):
+        """ Removes all nodes but the beam_size-finished best ones (lowest neg log prob) """
+        nodes = PriorityQueue() 
         # Keep track of how many search paths are already finished (EOS)
         finished = self.final.qsize()
         for _ in range(self.beam_size-finished):
             node = self.nodes.get()
             nodes.put(node)
+        return nodes  
+
+    def _constant_prune(self):
+        """ Removes all nodes but the beam_size best ones (lowest neg log prob) """
+        nodes = PriorityQueue()
+
+        for _ in range(self.beam_size):
+            node = self.nodes.get()
+            nodes.put(node)            
+        return nodes
+    
+    def _prune_stop_prune(self):
+        nodes = PriorityQueue()
+        #There must be at least one finished hyp to start pruning incomplete hyp
+        if self.final.qsize()>0:
+            while not self.nodes.empty() and nodes.qsize()<self.beam_size:
+                node = self.nodes.get(timeout=1)
+                #check if this incomplete hypothesis has lower log prob than the best finished
+                if node[0] <= self.final.queue[0][0]:
+                    #if it is lower, continue expanding this hyp at next time step
+                    nodes.put(node)
+
+        else:
+            #If there are no finished beam's just keep the beam size constant
+            for _ in range(self.beam_size):
+                node = self.nodes.get()
+                nodes.put(node)
+
+        return nodes
+
+    def prune(self):
+        """ Prunes the search space at each decoding time step according to stop criterion"""
+
+        if self.stop == "default":
+            nodes = self._default_prune()
+        elif self.stop == "constant":
+            nodes = self._constant_prune()
+        else:
+            #pruning stop criterion
+            nodes = self._prune_stop_prune()
+
         self.nodes = nodes
 
 
 class BeamSearchNode(object):
     """ Defines a search node and stores values important for computation of beam search path"""
-    def __init__(self, search, emb, lstm_out, final_hidden, final_cell, mask, sequence, logProb, length):
+    def __init__(self, search, emb, lstm_out, final_hidden, final_cell, mask, sequence, logProb, length, completed: bool = False):
 
         # Attributes needed for computation of decoder states
         self.sequence = sequence
@@ -82,6 +124,10 @@ class BeamSearchNode(object):
         self.length = length
 
         self.search = search
+
+        if self.search.stop == "constant":
+            #by default will be False
+            self.completed = completed
 
     def eval(self, alpha=0.0):
         """ Returns score of sequence up to this node 

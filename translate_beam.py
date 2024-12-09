@@ -32,7 +32,8 @@ def get_args():
     parser.add_argument('--beam-size', default=5, type=int, help='number of hypotheses expanded in beam search')
     # alpha hyperparameter for length normalization (described as lp in https://arxiv.org/pdf/1609.08144.pdf equation 14)
     parser.add_argument('--alpha', default=0.0, type=float, help='alpha for softer length normalization')
-
+    #add CLI arg to determine which stop criteria to use
+    parser.add_argument("--stop_criterion", default="default", type=str, choices=["default","constant","pruning"])
     return parser.parse_args()
 
 
@@ -76,7 +77,7 @@ def main(args):
 
         # Create a beam search object or every input sentence in batch
         batch_size = sample['src_tokens'].shape[0]
-        searches = [BeamSearch(args.beam_size, args.max_len - 1, tgt_dict.unk_idx) for i in range(batch_size)]
+        searches = [BeamSearch(args.beam_size, args.max_len - 1, tgt_dict.unk_idx, stop=args.stop_criterion) for i in range(batch_size)]
 
         with torch.no_grad():
             # Compute the encoder output
@@ -125,11 +126,17 @@ def main(args):
         #import pdb;pdb.set_trace()
         # Start generating further tokens until max sentence length reached
         for _ in range(args.max_len-1):
-
-            # Get the current nodes to expand
+            
             nodes = [n[1] for s in searches for n in s.get_current_beams()]
-            if nodes == []:
-                break # All beams ended in EOS
+            if args.stop_criterion!="constant":
+                #for default and pruning stop criterion, we stop when we've pruned away all the unfinished hypotheses
+                if nodes == []:
+                    break # All beams ended in EOS
+            else:
+                #check if all nodes are complete or not in the constant condition
+                complete = [1 if n.completed else 0 for n in nodes]
+                if torch.all(torch.Tensor(complete).int() == 1):
+                    break
 
             # Reconstruct prev_words, encoder_out from current beam search nodes
             prev_words = torch.stack([node.sequence for node in nodes])
@@ -172,15 +179,25 @@ def main(args):
 
                     # Store the node as final if EOS is generated
                     if next_word[-1] == tgt_dict.eos_idx:
-                        node = BeamSearchNode(
-                            search, node.emb, node.lstm_out, node.final_hidden,
-                            node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
-                            next_word)), node.logp, node.length
-                            )
-                        search.add_final(-node.eval(args.alpha), node)
+                        if args.stop_criterion != "constant":
+                            #add the finished hypotheses to the final PriorityQueue
+                            node = BeamSearchNode(
+                                search, node.emb, node.lstm_out, node.final_hidden,
+                                node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
+                                next_word)), node.logp, node.length
+                                )
+                            search.add_final(-node.eval(args.alpha), node)
+                        elif args.stop_criterion == "constant":
+                             #Add the node as normal, but now we mark as completed
+                             node = BeamSearchNode(
+                                search, node.emb, node.lstm_out, node.final_hidden,
+                                node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
+                                next_word)), node.logp, node.length, completed = True
+                                )
+                             search.add(-node.eval(args.alpha), node)                           
 
-                    # Add the node to current nodes for next iteration
                     else:
+                        # Add the node to current nodes for next iteration
                         node = BeamSearchNode(
                             search, node.emb, node.lstm_out, node.final_hidden,
                             node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
